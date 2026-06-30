@@ -101,5 +101,7 @@ kakao-menu-to-slack/
 ## 한계 / 비고
 - 메뉴가 **공개 프로필 사진**으로 올라오는 경우에만 동작한다(현재 그렇게 운영 중으로 확인됨).
   만약 어느 날부터 비공개 카톡 메시지로만 발송된다면 공개 API로는 가져올 수 없다.
-- Slack 이미지 블록은 공개 `https` 이미지 URL을 사용한다(kakaocdn https 확인됨).
-  드물게 렌더가 안 되면 봇 토큰 + 파일 업로드(`files_upload_v2`) 방식으로 전환할 수 있다.
+- Slack 전송은 `attachments`(image_url) 형식을 우선 사용하고, 실패 시 순수 `text`+링크 펼치기로
+  자동 폴백한다(에러 본문은 Actions 로그에 기록). 공개 `https` 이미지 URL을 쓴다(kakaocdn https 확인됨).
+  - 참고: Block Kit `image` 블록은 이 Webhook에서 400(invalid_blocks)이 나서 사용하지 않는다.
+  - 더 확실한 표시가 필요하면 봇 토큰 + 파일 업로드(`files_upload_v2`)로 전환 가능.
