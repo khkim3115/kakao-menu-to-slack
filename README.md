@@ -1,0 +1,105 @@
+# kakao-menu-to-slack
+
+1층 구내식당 **더 미라클푸드** 카카오톡 채널([`pf.kakao.com/_xjxoPlG`](https://pf.kakao.com/_xjxoPlG))의
+**프로필 사진(대표 이미지)** 은 매일 오전에 **당일 메뉴 이미지**로 바뀐다.
+이 저장소는 그 이미지를 자동으로 감지해 **매일 아침 Slack** 으로 보내준다.
+
+- 별도 서버 불필요 — **GitHub Actions(무료 cron)** 로 동작
+- 카카오 로그인/계정 불필요 — **공개 API**로 프로필 이미지를 읽음
+- 의존성 없음 — **Python 표준 라이브러리만** 사용
+
+---
+
+## 동작 원리
+
+```
+GitHub Actions (KST 오전 시간대, 10분 간격)
+   ① 공개 JSON API 호출 → 현재 프로필 이미지(id/path/url) 추출
+      https://pf.kakao.com/rocket-web/web/v2/profiles/_xjxoPlG
+   ② 회사 로고면 무시(= 메뉴 아님)
+   ③ 직전에 보낸 이미지와 다른 새 이미지면 = 오늘의 메뉴 → Slack 전송
+   ④ 마지막 전송 이미지를 state/last_seen.json 에 커밋(다음 실행이 기억)
+```
+
+식당은 오전엔 메뉴, 이후엔 로고로 되돌리는 패턴이라 **단발 실행이 아니라 폴링**한다.
+**로고 필터 + 변경 감지** 덕분에 주말·휴무·메뉴 없는 날(로고 그대로)은 **자동으로 아무것도 보내지 않는다.**
+
+---
+
+## 설치 / 설정 (약 5분)
+
+### 1. Slack Incoming Webhook 발급
+1. <https://api.slack.com/apps> → **Create New App** → *From scratch* → 워크스페이스 선택
+2. 좌측 **Incoming Webhooks** → **Activate Incoming Webhooks** 켜기
+3. **Add New Webhook to Workspace** → 메뉴를 받을 **채널 선택** → 생성된
+   `https://hooks.slack.com/services/...` URL 복사
+
+### 2. 이 저장소를 본인 GitHub 계정에 올리기
+```bash
+cd kakao-menu-to-slack
+git init
+git add .
+git commit -m "init: kakao menu to slack"
+gh repo create kakao-menu-to-slack --public --source=. --push
+# (gh 없이) GitHub에서 빈 레포 생성 후: git remote add origin <URL> && git push -u origin main
+```
+> **public 권장:** Actions 분(分) 무제한 + 스케줄 안정적. private 도 무료 2,000분/월 내에서 충분.
+
+### 3. Webhook URL 을 GitHub Secret 으로 등록
+레포 → **Settings → Secrets and variables → Actions → New repository secret**
+- Name: `SLACK_WEBHOOK_URL`
+- Value: 1번에서 복사한 Webhook URL
+
+### 4. 배선 테스트 (즉시)
+레포 → **Actions → kakao-menu-to-slack → Run workflow** → **test = `true`** 로 실행.
+현재 프로필(로고라도)이 Slack 에 도착하면 가져오기·전송 경로 정상.
+이후 자동 스케줄은 매 평일 오전에 **메뉴가 바뀌는 순간 1건**만 보낸다.
+
+---
+
+## 로컬에서 테스트
+```bash
+# Slack 까지 실제 전송 (로고/중복 무시)
+SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..." python check_menu.py --test
+
+# 전송 없이 현재 프로필 상태만 관찰 (id/path/logo 여부 확인)
+python check_menu.py        # SLACK_WEBHOOK_URL 없이 실행하면 로고일 땐 그냥 skip 로그만 출력
+```
+
+---
+
+## 시간대(cron) 튜닝
+`.github/workflows/menu.yml` 의 `schedule` 은 KST 06:00~11:59 를 10분 간격으로 폴링한다.
+배포 후 첫 1~2일 **Actions 로그의 `[observe]`** 줄(각 폴링의 관측 id/path/시각)을 보고
+메뉴가 실제로 올라오는 시간대에 맞춰 창을 좁히거나 간격을 5분으로 줄이면 된다.
+
+> GitHub 무료 cron 은 수~수십 분 지연될 수 있어 창을 넉넉히 잡았다.
+
+---
+
+## 로고가 바뀌었을 때
+식당이 회사 로고 이미지를 새로 교체하면 메뉴로 오인해 1회 전송될 수 있다.
+평일 오후(메뉴 내려간 시간)에 `python check_menu.py` 를 실행해 `[observe]` 의 `path`/`id` 를 확인하고,
+`check_menu.py` 상단 상수를 갱신:
+```python
+KNOWN_LOGO_PATH = "<새 path>"
+KNOWN_LOGO_ID = <새 id>
+```
+
+---
+
+## 파일 구조
+```
+kakao-menu-to-slack/
+├─ .github/workflows/menu.yml   # cron 스케줄 + 스크립트 실행 + state 자동 커밋
+├─ check_menu.py                # 가져오기 → 로고/중복 필터 → Slack 전송
+├─ state/last_seen.json         # 마지막으로 보낸 이미지 (자동 커밋, 변경 이력 = 메뉴 기록)
+├─ .gitignore
+└─ README.md
+```
+
+## 한계 / 비고
+- 메뉴가 **공개 프로필 사진**으로 올라오는 경우에만 동작한다(현재 그렇게 운영 중으로 확인됨).
+  만약 어느 날부터 비공개 카톡 메시지로만 발송된다면 공개 API로는 가져올 수 없다.
+- Slack 이미지 블록은 공개 `https` 이미지 URL을 사용한다(kakaocdn https 확인됨).
+  드물게 렌더가 안 되면 봇 토큰 + 파일 업로드(`files_upload_v2`) 방식으로 전환할 수 있다.

@@ -1,0 +1,7 @@
+# 이 저장소는 Linux(GitHub Actions)에서 실행된다 → 항상 LF로 저장/체크아웃
+* text=auto eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
