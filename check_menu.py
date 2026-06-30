@@ -68,6 +68,7 @@ def get_profile_image():
             "id": pi.get("id") or prof.get("profile_image_id"),
             "path": pi.get("path"),
             "url": to_https(url),
+            "avg": pi.get("avg"),
             "source": "json",
         }
     except Exception as e:
@@ -80,7 +81,7 @@ def get_profile_image():
         raise RuntimeError("프로필 이미지를 찾지 못함 (JSON / og:image 모두 실패)")
     url = to_https(m.group(1))
     pm = re.search(r"/dn/([^/]+/[^/]+/[^/]+)/img", url)  # .../dn/<path>/img_xl.jpg
-    return {"id": None, "path": pm.group(1) if pm else None, "url": url, "source": "og"}
+    return {"id": None, "path": pm.group(1) if pm else None, "url": url, "avg": None, "source": "og"}
 
 
 def img_key(img):
@@ -121,17 +122,22 @@ def save_state(img):
 
 
 def _post(webhook, payload):
+    """Slack에 POST하고 (status_code, body) 반환. HTTPError도 잡아서 본문을 돌려준다(디버깅용)."""
     req = urllib.request.Request(
         webhook,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return r.read().decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
 
 
 def post_slack(img, note=None):
+    """Incoming Webhook으로 메뉴 전송. 관대한 형식부터 순서대로 시도(첫 성공에서 종료)."""
     webhook = os.environ.get("SLACK_WEBHOOK_URL")
     if not webhook:
         raise RuntimeError("SLACK_WEBHOOK_URL 환경변수가 설정되지 않았습니다")
@@ -139,16 +145,35 @@ def post_slack(img, note=None):
     title = f"🍱 오늘의 점심 메뉴 ({now.month}/{now.day}, {WEEKDAYS_KO[now.weekday()]})"
     if note:
         title += f" — {note}"
-    payload = {
-        "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": title, "emoji": True}},
-            {"type": "image", "image_url": img["url"], "alt_text": "오늘의 메뉴"},
-            {"type": "context", "elements": [
-                {"type": "mrkdwn", "text": f"<{HOME_URL}|더 미라클푸드 채널> · {now.strftime('%H:%M')} KST"},
-            ]},
-        ]
+
+    # 1순위: attachments(image_url) — Slack이 이미지를 비동기로 가져와 400을 거의 안 냄
+    attachments_payload = {
+        "text": title,
+        "attachments": [{
+            "color": img.get("avg") or "#5b5b5b",
+            "title": "더 미라클푸드 채널",
+            "title_link": HOME_URL,
+            "image_url": img["url"],
+            "fallback": f"{title} {img['url']}",
+            "footer": f"{now.strftime('%H:%M')} KST",
+        }],
     }
-    print(f"[slack] 전송 응답: {_post(webhook, payload)}")
+    # 2순위: 순수 text + 링크 자동 펼치기(unfurl) — 가장 단순해 사실상 항상 성공
+    text_payload = {
+        "text": f"{title}\n{img['url']}",
+        "unfurl_links": True,
+        "unfurl_media": True,
+    }
+
+    last = None
+    for label, payload in (("attachments", attachments_payload), ("text+unfurl", text_payload)):
+        code, body = _post(webhook, payload)
+        if 200 <= code < 300:
+            print(f"[slack] 전송 완료 ({label})")
+            return
+        last = (label, code, body)
+        print(f"[slack][warn] {label} 실패 code={code} body={body!r} → 다음 방식 시도", file=sys.stderr)
+    raise RuntimeError(f"Slack 전송 실패(모든 방식): {last}")
 
 
 def alert_slack(msg):
