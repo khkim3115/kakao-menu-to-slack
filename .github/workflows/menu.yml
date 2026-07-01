@@ -2,9 +2,8 @@ name: kakao-menu-to-slack
 
 on:
   schedule:
-    # GitHub cron 은 UTC 기준. 한국시간(KST = UTC+9) 오전을 촘촘히 폴링.
-    - cron: "*/10 21-23 * * *"   # UTC 21:00–23:59  ≈ KST 06:00–08:59
-    - cron: "*/10 0-2 * * *"     # UTC 00:00–02:59  ≈ KST 09:00–11:59
+    # GitHub cron 은 UTC 기준. KST(UTC+9) 09:00 이후에만 폴링·전송한다.
+    - cron: "*/10 0-3 * * *"     # UTC 00:00–03:59  ≈ KST 09:00–12:59
   workflow_dispatch:
     inputs:
       test:

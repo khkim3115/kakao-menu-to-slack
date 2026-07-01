@@ -35,6 +35,9 @@ HOME_URL = f"https://pf.kakao.com/{CHANNEL_ID}"
 KNOWN_LOGO_PATH = "r4cHt/dJMcagTBNko/4t7NCly6CZ9dNJ8tWWqCf1"
 KNOWN_LOGO_ID = 189733018
 
+# 이 시각(KST) 이전에는 전송하지 않는다. 예: 9 이면 09:00 부터 전송.
+SEND_AFTER_HOUR_KST = int(os.environ.get("SEND_AFTER_HOUR_KST", "9"))
+
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "last_seen.json")
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -213,6 +216,13 @@ def main():
     state = load_state()
     if img_key(img) == state.get("last_key"):
         print("[skip] 직전에 보낸 이미지와 동일 → 중복 전송 안 함")
+        return
+
+    # 9시(KST) 이전이면 새 메뉴라도 전송 보류. 상태를 저장하지 않으므로
+    # 9시 이후 첫 폴링이 동일 이미지를 '새 메뉴'로 보고 전송한다.
+    if now.hour < SEND_AFTER_HOUR_KST:
+        print(f"[hold] 새 메뉴 감지했으나 아직 KST {now.hour}시 → "
+              f"{SEND_AFTER_HOUR_KST}시 이후에 전송(상태 저장 안 함)")
         return
 
     print("[send] 새 메뉴 감지 → Slack 전송")
