@@ -4,15 +4,19 @@
 더 미라클푸드 카카오톡 채널의 '당일 메뉴' 프로필 이미지를 감지해 Slack으로 보낸다.
 
 동작 원리:
+  0) 주말·한국 공휴일이면 즉시 종료한다(식당이 휴일에 이미지를 바꿔도 전송 안 함).
   1) 공개 API(로그인 불필요)에서 현재 채널 프로필 이미지를 읽는다.
   2) 회사 로고면 무시한다(= 메뉴 아님).
   3) 직전에 보낸 이미지와 다른 새 이미지면 = 오늘의 메뉴 → Slack 전송 후 상태 저장.
-  → 이 한 가지 로직으로 주말·휴무·메뉴 없는 날(로고 그대로)은 자동으로 아무것도 보내지 않는다.
+  → 로고 필터가 휴무·메뉴 없는 날을 거르고, 0)의 달력 가드가 주말·공휴일을 확실히 막는다.
 
 환경변수:
   SLACK_WEBHOOK_URL  (필수)  Slack Incoming Webhook URL
   CHANNEL_ID         (선택)  기본 "_xjxoPlG"
-  TEST_MODE          (선택)  "1"이면 로고/중복 필터를 무시하고 현재 이미지를 강제 전송(배선 점검용)
+  TEST_MODE          (선택)  "1"이면 로고/중복/주말·공휴일 필터를 무시하고 현재 이미지를 강제 전송(배선 점검용)
+
+선택 의존성:
+  holidays (pip)  한국 공휴일(대체공휴일 포함) 판정용. 없으면 경고 후 주말 체크만 적용.
 """
 import os
 import re
@@ -42,6 +46,20 @@ STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120 Safari/537.36")
+
+
+def rest_day_reason(now):
+    """주말·한국 공휴일이면 스킵 사유 문자열, 영업일이면 None."""
+    if now.weekday() >= 5:
+        return f"주말({WEEKDAYS_KO[now.weekday()]})"
+    try:
+        import holidays
+    except ImportError:
+        print("[warn] holidays 패키지 없음 → 공휴일 체크 생략 (pip install holidays)",
+              file=sys.stderr)
+        return None
+    name = holidays.country_holidays("KR").get(now.date())
+    return f"공휴일({name})" if name else None
 
 
 def to_https(url):
@@ -192,6 +210,14 @@ def alert_slack(msg):
 def main():
     test_mode = os.environ.get("TEST_MODE") == "1" or "--test" in sys.argv
     now = datetime.now(KST)
+
+    # 주말·공휴일 가드. 로고 필터만으로는 식당이 휴일에 프로필을 바꾸면 전송돼 버린다
+    # (2026-07-04 토요일 실제 발생). TEST_MODE 는 배선 점검용이므로 가드를 통과시킨다.
+    if not test_mode:
+        reason = rest_day_reason(now)
+        if reason:
+            print(f"[skip] {reason} → 전송 안 함")
+            return
 
     try:
         img = get_profile_image()
