@@ -6,9 +6,11 @@
 동작 원리:
   0) 주말·한국 공휴일이면 즉시 종료한다(식당이 휴일에 이미지를 바꿔도 전송 안 함).
   1) 공개 API(로그인 불필요)에서 현재 채널 프로필 이미지를 읽는다.
-  2) 회사 로고면 무시한다(= 메뉴 아님).
+  2) 회사 로고(등록된 목록)면 무시한다(= 메뉴 아님).
   3) 직전에 보낸 이미지와 다른 새 이미지면 = 오늘의 메뉴 → Slack 전송 후 상태 저장.
-  → 로고 필터가 휴무·메뉴 없는 날을 거르고, 0)의 달력 가드가 주말·공휴일을 확실히 막는다.
+     단, 오늘 이미 보냈으면 이미지가 또 바뀌어도 보내지 않는다(하루 1건).
+  → 로고 필터가 휴무·메뉴 없는 날을 거르고, 0)의 달력 가드가 주말·공휴일을,
+    하루 1건 캡이 재업로드(수정본) 중복을 막는다.
 
 환경변수:
   SLACK_WEBHOOK_URL  (필수)  Slack Incoming Webhook URL
@@ -33,11 +35,13 @@ CHANNEL_ID = os.environ.get("CHANNEL_ID", "_xjxoPlG")
 API_URL = f"https://pf.kakao.com/rocket-web/web/v2/profiles/{CHANNEL_ID}"
 HOME_URL = f"https://pf.kakao.com/{CHANNEL_ID}"
 
-# 현재 회사 로고(= 메뉴 아님). 식당이 로고 이미지를 교체하면 아래 값을 갱신하세요.
+# 회사 로고 이미지 목록(= 메뉴 아님). 식당이 새 로고를 쓰기 시작하면 항목을 추가하세요.
 #   확인 방법: python check_menu.py 를 평일 오후(메뉴 내려간 시간)에 실행해
 #   [observe] 로그의 path/id 값을 그대로 복사.
-KNOWN_LOGO_PATH = "r4cHt/dJMcagTBNko/4t7NCly6CZ9dNJ8tWWqCf1"
-KNOWN_LOGO_ID = 189733018
+KNOWN_LOGOS = [  # (path, id)
+    ("r4cHt/dJMcagTBNko/4t7NCly6CZ9dNJ8tWWqCf1", 189733018),  # 기본 로고(흰 배경)
+    ("qlXJg/dJMcadCt7VC/EbJ6hkYOJdKKOTiORMmnW1", 189957406),  # 노란 로고(어두운 배경, 2026-07-04 오발송 원인)
+]
 
 # 이 시각(KST) 이전에는 전송하지 않는다. 예: 9 이면 09:00 부터 전송.
 SEND_AFTER_HOUR_KST = int(os.environ.get("SEND_AFTER_HOUR_KST", "9"))
@@ -115,7 +119,15 @@ def img_key(img):
 
 
 def is_logo(img):
-    return img.get("path") == KNOWN_LOGO_PATH or (img.get("id") and img["id"] == KNOWN_LOGO_ID)
+    return any(
+        img.get("path") == path or (img.get("id") and img["id"] == logo_id)
+        for path, logo_id in KNOWN_LOGOS
+    )
+
+
+def sent_today(state, now):
+    """오늘(KST) 이미 전송했으면 True. last_sent_kst 형식: 'YYYY-MM-DD HH:MM:SS'."""
+    return (state.get("last_sent_kst") or "")[:10] == now.strftime("%Y-%m-%d")
 
 
 def load_state():
@@ -126,7 +138,9 @@ def load_state():
         return {}
 
 
-def save_state(img):
+def save_state(img, sent_kst=None):
+    """마지막으로 처리한 이미지를 기록. sent_kst 를 주면 전송 시각은 그 값을 유지
+    (= 전송 없이 '본 것'만 기록하는 하루 1건 캡 경로용)."""
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     now = datetime.now(KST)
     state = {
@@ -134,7 +148,7 @@ def save_state(img):
         "last_image_id": img.get("id"),
         "last_image_path": img.get("path"),
         "last_image_url": img.get("url"),
-        "last_sent_kst": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "last_sent_kst": sent_kst or now.strftime("%Y-%m-%d %H:%M:%S"),
     }
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
@@ -242,6 +256,16 @@ def main():
     state = load_state()
     if img_key(img) == state.get("last_key"):
         print("[skip] 직전에 보낸 이미지와 동일 → 중복 전송 안 함")
+        return
+
+    # 하루 1건 캡: 같은 날 이미지가 또 바뀌어도(오타 수정 재업로드 등) 다시 보내지 않는다
+    # (2026-07-06 09:05/10:35 중복 발송 실제 발생). 억제한 이미지도 last_key 로
+    # 기록해 둔다(전송 시각은 보존) — 안 그러면 이 이미지가 다음 영업일 아침까지
+    # 프로필에 남아 있을 때 어제 메뉴를 오늘 날짜로 오발송하게 된다.
+    if sent_today(state, now):
+        print(f"[skip] 오늘 이미 전송함({state.get('last_sent_kst')}) → 하루 1건 캡"
+              f" (본 이미지로만 기록)")
+        save_state(img, sent_kst=state.get("last_sent_kst"))
         return
 
     # 9시(KST) 이전이면 새 메뉴라도 전송 보류. 상태를 저장하지 않으므로
