@@ -181,18 +181,21 @@ def post_slack(img, note=None):
     if note:
         title += f" — {note}"
 
-    # 1순위: Block Kit(image 블록) — 레거시 attachments.image_url 은 최신 Slack에서
-    # 렌더가 안 됐다(2026-07 확인). image 블록은 현행 1급 요소라 원격 이미지를 정상 표시한다.
-    blocks_payload = {
-        "text": title,  # 알림/폴백용 텍스트
-        "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn",
-             "text": f"{title}\n<{HOME_URL}|더 미라클푸드 채널>"}},
-            {"type": "image", "image_url": img["url"], "alt_text": "오늘의 점심 메뉴"},
-        ],
+    # 레거시 커스텀 인티그레이션 웹훅은 Block Kit(blocks)을 거부한다(400 invalid_blocks, 2026-07 확인).
+    # 받아주는 이미지 방식은 attachments.image_url 뿐 → 이것으로 전송한다. 이미지 표시는
+    # Slack의 원격 이미지 미리보기(환경설정)에 의존한다.
+    attachments_payload = {
+        "text": title,
+        "attachments": [{
+            "color": img.get("avg") or "#5b5b5b",
+            "title": "더 미라클푸드 채널",
+            "title_link": HOME_URL,
+            "image_url": img["url"],
+            "fallback": f"{title} {img['url']}",
+            "footer": f"{now.strftime('%H:%M')} KST",
+        }],
     }
-    # 2순위: 순수 text + 링크 자동 펼치기(unfurl) — 가장 단순해 사실상 항상 성공.
-    # image 블록이 어떤 이유로 렌더 안 될 때를 대비한 폴백(직접 .jpg 링크는 미디어로 펼쳐짐).
+    # 폴백: 순수 text + 링크 자동 펼치기(unfurl). attachments가 HTTP 실패할 때만 시도.
     text_payload = {
         "text": f"{title}\n{img['url']}",
         "unfurl_links": True,
@@ -200,7 +203,7 @@ def post_slack(img, note=None):
     }
 
     last = None
-    for label, payload in (("blocks", blocks_payload), ("text+unfurl", text_payload)):
+    for label, payload in (("attachments", attachments_payload), ("text+unfurl", text_payload)):
         code, body = _post(webhook, payload)
         if 200 <= code < 300:
             print(f"[slack] 전송 완료 ({label})")
