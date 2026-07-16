@@ -1,0 +1,4 @@
+# 오늘의 점심 메뉴 이미지 재호스팅 위치.
+# check_menu.py 의 rehost_image() 가 매 전송마다 여기에 이미지를 커밋·푸시하고
+# 커밋 SHA 로 고정한 raw.githubusercontent.com URL 을 Slack image 블록에 사용한다.
+# (최근 30개만 유지, 나머지는 자동 prune)

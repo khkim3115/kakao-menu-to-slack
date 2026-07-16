@@ -40,7 +40,9 @@ jobs:
 
       - name: Run menu checker
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # test 모드에서는 나와의 대화(self-DM)로 가는 SLACK_WEBHOOK_URL_TEST 로 보내
+          # 공유 채널(#오늘의점심)에 테스트가 스팸되지 않게 한다. 평시는 운영 웹훅.
+          SLACK_WEBHOOK_URL: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && secrets.SLACK_WEBHOOK_URL_TEST || secrets.SLACK_WEBHOOK_URL }}
           TEST_MODE: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && '1' || '0' }}
         run: python check_menu.py
 
