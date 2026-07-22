@@ -155,13 +155,87 @@ KNOWN_LOGOS = [
 
 ---
 
+## 별식당(Instagram) — 두 번째 메뉴 소스
+
+직원들이 자주 가는 **별식당**([`instagram.com/byeolsikdang`](https://www.instagram.com/byeolsikdang/),
+평일 점심 뷔페)의 **당일 점심 메뉴판 사진**을 **같은 Slack 채널**에 매 영업일 1건 보낸다.
+카카오 봇과 독립된 스크립트([`check_byeolsikdang.py`](check_byeolsikdang.py)) · 워크플로 ·
+상태 파일로 동작하며, `check_menu.py` 의 검증된 헬퍼(주말·공휴일 가드, 하루 1건 캡, Slack POST)만
+재사용한다(카카오 스크립트는 건드리지 않음).
+
+### 왜 Apify(관리형 스크레이퍼)인가
+별식당은 카카오 채널이 없고 개인계정으로 보여 공식 Graph API(`business_discovery`)가 안 되며,
+인스타는 GitHub Actions 의 데이터센터 IP를 차단해 직접 스크래핑도 불가하다. **Apify** 관리형
+스크레이퍼(`apify/instagram-scraper`)가 자체 주거용 프록시로 대신 긁어 두 문제를 모두 우회한다.
+표준 라이브러리 HTTPS 호출 1번, 하루 1회면 무료 티어($5/월 크레딧) 안이다.
+
+### 동작 원리
+```
+GitHub Actions (KST 평일 09:09~14:54, 15분 간격)
+   ⓪ 유료 Apify 호출 "전에" 무료 가드로 단락(비용 최소화):
+      주말·공휴일 / 오늘 이미 전송(하루 1건 캡) / KST 09시 이전이면 → Apify 호출 없이 종료
+   ① Apify 동기 호출 1번 → 최근 게시물 JSON 배열 (유일한 유료 호출)
+   ② 메뉴판 선별: type∈{Image,Sidecar} + 오늘(KST) 날짜 + 캡션 매치 + 이미지 존재 → 최신 1건
+      (음식사진·공지·영상·어제 게시물은 자동 전송 안 함)
+   ③ shortcode 가 직전 전송분과 다르면 → Slack 전송(제목 + IG permalink + 이미지)
+   ④ state/byeolsikdang_last_seen.json 에 커밋(다음 실행이 기억)
+```
+**메뉴판 선별이 이 기능의 핵심**이다. 별식당 피드는 메뉴판 + 음식사진 + 공지가 섞여 있어
+"최신 게시물"을 그냥 집으면 안 되고, 캡션 패턴으로 오늘자 메뉴판만 골라야 한다.
+
+### 설정
+1. **Apify 계정 + 토큰**: [apify.com](https://apify.com) 가입 → **Console → Settings → API →
+   Personal API token** 복사.
+2. **GitHub Secret 등록**: 레포 → Settings → Secrets and variables → Actions →
+   - `APIFY_TOKEN` = 위 Apify 토큰 (**신규**)
+   - `SLACK_WEBHOOK_URL` = 카카오 봇과 **동일 시크릿 재사용**
+   - (선택) `APIFY_TOKEN_TEST` — Run workflow `test=true` 시 이 토큰을 우선 사용(운영 크레딧 보호).
+     없으면 `APIFY_TOKEN` 으로 폴백.
+   - (기존) `SLACK_WEBHOOK_URL_TEST` — test 실행은 나와의 대화로 전송(공유 채널 스팸 방지).
+3. **배선 테스트**: 레포 → Actions → **byeolsikdang-menu-to-slack → Run workflow → test = `true`**.
+   최신 이미지 게시물이 (테스트 웹훅으로) 도착하면 Apify·파싱·전송 경로 정상.
+
+### 캡션 필터 튜닝 (환경변수로 override)
+실제 캡션을 보고 조정한다 — 로컬에서 `python check_byeolsikdang.py --observe` 를 돌리면 최근
+게시물의 `caption` 과 `menu=True/False` 판정이 찍힌다. 메뉴판만 `True` 로 깨끗이 갈리게 맞춘다.
+
+| 노브 | 기본값 | 의미 |
+|---|---|---|
+| `MENU_CAPTION_REQUIRE_ALL` | `메뉴` | 캡션에 **모두** 포함돼야 하는 키워드(쉼표 구분) |
+| `MENU_CAPTION_REQUIRE_ANY` | `금일,오늘,점심` | 캡션에 **하나 이상** 포함돼야 하는 키워드 |
+| `SEND_AFTER_HOUR_KST` | `9` | 이 시각(KST) 이전엔 전송 보류(메뉴판이 평일 ~09시 게시) |
+| `RESULTS_LIMIT` | `6` | Apify 가 가져올 최근 게시물 수 |
+
+### 로컬에서 테스트
+```bash
+export APIFY_TOKEN=apify_api_xxx
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."   # 테스트 땐 테스트 웹훅 사용
+python check_byeolsikdang.py --observe   # 전송 없이 최근 게시물+필터 판정 출력(캡션 튜닝)
+python check_byeolsikdang.py --test      # 캡션 무시, 최신 이미지 게시물 강제 전송(배선 점검)
+python check_byeolsikdang.py             # 실제 경로(가드+필터+dedup)
+```
+
+### Slack 이 IG 이미지를 못 띄우면 (files_upload_v2 승격)
+IG CDN URL 은 서명·시한부라 게시 직후 전송으로 신선함을 유지한다. 그래도 Slack 이미지 프록시가
+IG 핫링크를 막아 **썸네일이 안 뜨면**(`--test` 후 눈으로 확인), Block Kit `image` 블록 대신
+**봇 토큰 + `files_upload_v2`** 로 승격한다: 스크립트가 `image_url` 바이트를 직접 다운로드해
+Slack 에 파일로 업로드하는 방식이다(웹훅이 아닌 봇 토큰 필요). text+unfurl 폴백(IG permalink 카드)
+은 그 사이에도 최소한의 표시를 보장한다.
+
+---
+
 ## 파일 구조
 ```
 kakao-menu-to-slack/
-├─ .github/workflows/menu.yml   # cron 스케줄 + 스크립트 실행 + state 자동 커밋
-├─ check_menu.py                # 가져오기 → 로고/중복 필터 → Slack 전송
-├─ state/last_seen.json         # 마지막으로 보낸 이미지 (자동 커밋, 변경 이력 = 메뉴 기록)
-├─ docs/superpowers/            # 설계 스펙 / 구현 계획 문서
+├─ .github/workflows/
+│  ├─ menu.yml                       # (카카오) cron + 실행 + state 커밋
+│  └─ byeolsikdang.yml               # (별식당) cron + 실행 + state 커밋(rebase-before-push)
+├─ check_menu.py                     # (카카오) 가져오기 → 로고/중복 필터 → Slack 전송
+├─ check_byeolsikdang.py             # (별식당) Apify → 메뉴판 선별 → Slack 전송 (헬퍼는 check_menu 재사용)
+├─ state/
+│  ├─ last_seen.json                 # (카카오) 마지막으로 보낸 이미지
+│  └─ byeolsikdang_last_seen.json    # (별식당) 마지막으로 보낸 게시물(shortcode 키)
+├─ docs/superpowers/                 # 설계 스펙 / 구현 계획 문서
 ├─ .gitignore
 └─ README.md
 ```
