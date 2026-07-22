@@ -193,7 +193,7 @@ GitHub Actions (KST 평일 09:09~14:54, 15분 간격)
      없으면 `APIFY_TOKEN` 으로 폴백.
    - (기존) `SLACK_WEBHOOK_URL_TEST` — test 실행은 나와의 대화로 전송(공유 채널 스팸 방지).
 3. **배선 테스트**: 레포 → Actions → **byeolsikdang-menu-to-slack → Run workflow → test = `true`**.
-   최신 이미지 게시물이 (테스트 웹훅으로) 도착하면 Apify·파싱·전송 경로 정상.
+   오늘 메뉴판(없으면 최신 이미지)이 (테스트 웹훅으로) 도착하면 Apify·파싱·전송 경로 정상.
 
 ### 캡션 필터 튜닝 (환경변수로 override)
 실제 캡션을 보고 조정한다 — 로컬에서 `python check_byeolsikdang.py --observe` 를 돌리면 최근
@@ -211,11 +211,14 @@ GitHub Actions (KST 평일 09:09~14:54, 15분 간격)
 export APIFY_TOKEN=apify_api_xxx
 export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."   # 테스트 땐 테스트 웹훅 사용
 python check_byeolsikdang.py --observe   # 전송 없이 최근 게시물+필터 판정 출력(캡션 튜닝)
-python check_byeolsikdang.py --test      # 캡션 무시, 최신 이미지 게시물 강제 전송(배선 점검)
+python check_byeolsikdang.py --test      # 강제 전송(메뉴판 우선, 없으면 최신 이미지) — 배선 점검
 python check_byeolsikdang.py             # 실제 경로(가드+필터+dedup)
 ```
 
 ### Slack 이 IG 이미지를 못 띄우면 (files_upload_v2 승격)
+> ✅ **2026-07-22 검증**: 오늘 메뉴판 `.jpg` 가 Block Kit `image` 블록으로 **정상 렌더**됨(Slack 이
+> 이미지를 직접 받아 호스팅). 아래는 향후 IG 가 핫링크를 막을 때를 위한 **폴백 안내**다.
+
 IG CDN URL 은 서명·시한부라 게시 직후 전송으로 신선함을 유지한다. 그래도 Slack 이미지 프록시가
 IG 핫링크를 막아 **썸네일이 안 뜨면**(`--test` 후 눈으로 확인), Block Kit `image` 블록 대신
 **봇 토큰 + `files_upload_v2`** 로 승격한다: 스크립트가 `image_url` 바이트를 직접 다운로드해
