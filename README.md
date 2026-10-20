@@ -158,6 +158,8 @@ Method `POST` · Body `{"ref":"main"}` · 헤더 `Authorization: Bearer <PAT>` /
    에 오늘 run 이 있나? **런이 아예 없으면** 스크립트가 아니라 트리거 문제다(1번으로).
    즉시 복구는 `gh workflow run <워크플로>.yml --ref main` — 중복 방지 가드가 있어 이중 전송은 없다.
 3. **스크립트 로그** — `[skip]`(주말·공휴일·로고·중복) / `[observe]`(현재 이미지) / `[hold]`(9시 이전) / `[send]` 중 무엇이 찍혔나?
+   별식당은 `[fallback]`(주 Actor 차단 → 폴백 사용) / `[error] 게시물 조회 실패`(둘 다 실패)도 확인 —
+   아래 [인스타 차단 대응](#인스타-차단-대응-폴백--하루-1회-실패-안내) 참고.
 
 ---
 
@@ -188,14 +190,15 @@ KNOWN_LOGOS = [
 별식당은 카카오 채널이 없고 개인계정으로 보여 공식 Graph API(`business_discovery`)가 안 되며,
 인스타는 GitHub Actions 의 데이터센터 IP를 차단해 직접 스크래핑도 불가하다. **Apify** 관리형
 스크레이퍼(`apify/instagram-scraper`)가 자체 주거용 프록시로 대신 긁어 두 문제를 모두 우회한다.
-표준 라이브러리 HTTPS 호출 1번, 하루 1회면 무료 티어($5/월 크레딧) 안이다.
+표준 라이브러리 HTTPS 호출 1번(차단된 날만 폴백 1번 추가), 하루 1회면 무료 티어($5/월 크레딧) 안이다.
 
 ### 동작 원리
 ```
 트리거 이중화 — cron-job.org(주, KST 평일 09:05~11:50) + GitHub cron(백업, KST 평일 07:09~14:54)
    ⓪ 유료 Apify 호출 "전에" 무료 가드로 단락(비용 최소화):
       주말·공휴일 / 오늘 이미 전송(하루 1건 캡) / KST 09시 이전이면 → Apify 호출 없이 종료
-   ① Apify 동기 호출 1번 → 최근 게시물 JSON 배열 (유일한 유료 호출)
+   ① Apify 동기 호출 1번 → 최근 게시물 JSON 배열 (유료 호출)
+      인스타 차단·오류면 폴백 Actor 로 1번 더 → 둘 다 실패하면 채널에 하루 1회 안내 후 종료
    ② 메뉴판 선별: type∈{Image,Sidecar} + 오늘(KST) 날짜 + 캡션 매치 + 이미지 존재 → 최신 1건
       (음식사진·공지·영상·어제 게시물은 자동 전송 안 함)
    ③ shortcode 가 직전 전송분과 다르면 → Slack 전송(제목 + IG permalink + 이미지)
@@ -203,6 +206,24 @@ KNOWN_LOGOS = [
 ```
 **메뉴판 선별이 이 기능의 핵심**이다. 별식당 피드는 메뉴판 + 음식사진 + 공지가 섞여 있어
 "최신 게시물"을 그냥 집으면 안 되고, 캡션 패턴으로 오늘자 메뉴판만 골라야 한다.
+
+### 인스타 차단 대응 (폴백 + 하루 1회 실패 안내)
+**사례(2026-10-20)**: 인스타가 `apify/instagram-scraper` 의 게시물 피드 GraphQL 을 100% 차단(Apify
+전역 장애, 구 빌드 고정도 무효 — Apify Issues 다수 보고)해 Actor 가 `no_items` 만 반환했고, 스크립트는
+이를 "메뉴판 없음"으로 보고 **알림 없이 skip** 해 그날 메뉴가 안 나갔다. 이후 동작:
+
+| 주 Actor 결과 | 판정 | 처리 |
+|---|---|---|
+| 게시물 있음 | 정상 | 그대로 메뉴판 선별 |
+| `no_items` + `requestErrorMessages` **0건** | 기간 내 게시물 없음(예: 월요일 아침 주말 공백) | 폴백 없이 skip(과금 절약) |
+| `no_items` + `requestErrorMessages` **있음** / 예외 | 차단·오류 | **폴백** `apify/instagram-profile-scraper` 의 `latestPosts`(최근 12개) |
+| 폴백도 실패 | 수집 불가 | 채널에 **하루 1회** "인스타에서 직접 확인" 안내 + Actions `::error` 주석 |
+
+- 실패 안내 기록(`last_alert_kst`)은 state 에 남기고 기존 전송 기록은 보존한다 → 같은 날 재안내는
+  없고, 나중에 복구되면 그날 메뉴는 정상 전송된다. 기록이 커밋되도록 이 경우는 exit 0 으로 끝난다.
+- 폴백 비용: 차단된 날에만 폴링당 프로필 1건(약 $0.0026) 추가.
+- 진단: Apify Console → Runs → 해당 run Log 에 `Request got blocked … reached maximum retries` 가
+  있으면 인스타 차단이다. 전역 장애 여부는 Actor 페이지의 Issues 탭에서 확인.
 
 ### 설정
 1. **Apify 계정 + 토큰**: [apify.com](https://apify.com) 가입 → **Console → Settings → API →
