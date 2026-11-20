@@ -40,9 +40,12 @@ jobs:
 
       - name: Run menu checker
         env:
-          # test 모드에서는 나와의 대화(self-DM)로 가는 SLACK_WEBHOOK_URL_TEST 로 보내
-          # 공유 채널(#오늘의점심)에 테스트가 스팸되지 않게 한다. 평시는 운영 웹훅.
-          SLACK_WEBHOOK_URL: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && secrets.SLACK_WEBHOOK_URL_TEST || secrets.SLACK_WEBHOOK_URL }}
+          # 2026-11-20 부터 평시·test 구분 없이 나와의 대화(self-DM)로 가는
+          # SLACK_WEBHOOK_URL_TEST 로만 보낸다 — 공유 채널(#오늘의점심) 발송 중단(사용자 요청).
+          # 운영 시크릿 SLACK_WEBHOOK_URL 은 지우지 않고 둔다. 채널 발송을 되살리려면 값을
+          # (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && secrets.SLACK_WEBHOOK_URL_TEST || secrets.SLACK_WEBHOOK_URL
+          # 로 되돌린다. TEST 시크릿이 비면 운영 채널로 새지 않고 "미설정" 오류로 멈춘다(폴백 없음, 의도).
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL_TEST }}
           TEST_MODE: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && '1' || '0' }}
         run: python check_menu.py
 
