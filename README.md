@@ -130,8 +130,12 @@ Method `POST` · Body `{"ref":"main"}` · 헤더 `Authorization: Bearer <PAT>` /
 `Accept: application/vnd.github+json` / `Content-Type: application/json` ·
 타임존 `Asia/Seoul` · 실행 실패 시 이메일 알림 ON.
 
-> **`inputs` 없이 dispatch 하면** 워크플로의 `test` 기본값 `false` 가 적용돼 **운영 경로**(공유 채널)로
-> 동작한다. test 모드(나와의 대화)는 Actions UI 에서 수동으로 `test=true` 를 줄 때만 켜진다.
+> **`inputs` 없이 dispatch 하면** 워크플로의 `test` 기본값 `false` 가 적용돼 **운영 경로**(필터·중복
+> 방지 적용)로 동작한다. test 모드는 Actions UI 에서 수동으로 `test=true` 를 줄 때만 켜진다.
+>
+> **전송 대상(2026-11-20~):** 운영·test 모두 `SLACK_WEBHOOK_URL_TEST`(나와의 대화)로만 보낸다.
+> 공유 채널(#오늘의점심) 발송은 중단 — 되살리는 법은 `menu.yml`·`byeolsikdang.yml` 의
+> `SLACK_WEBHOOK_URL:` 줄 위 주석 참고.
 
 별식당 잡의 시(hour) 범위가 더 좁은 건 의도다 — 메뉴판을 찾기 전까진 폴링마다 **유료 Apify 호출**이
 발생하므로(찾은 뒤엔 하루 1건 캡이 이후 폴링을 전부 무료로 단락), 메뉴가 안 올라온 날의 최대 비용을
@@ -233,7 +237,7 @@ KNOWN_LOGOS = [
    - `SLACK_WEBHOOK_URL` = 카카오 봇과 **동일 시크릿 재사용**
    - (선택) `APIFY_TOKEN_TEST` — Run workflow `test=true` 시 이 토큰을 우선 사용(운영 크레딧 보호).
      없으면 `APIFY_TOKEN` 으로 폴백.
-   - (기존) `SLACK_WEBHOOK_URL_TEST` — test 실행은 나와의 대화로 전송(공유 채널 스팸 방지).
+   - (기존) `SLACK_WEBHOOK_URL_TEST` — 나와의 대화 웹훅. 2026-11-20 부터 운영·test 모두 이것만 쓴다.
 3. **배선 테스트**: 레포 → Actions → **byeolsikdang-menu-to-slack → Run workflow → test = `true`**.
    오늘 메뉴판(없으면 최신 이미지)이 (테스트 웹훅으로) 도착하면 Apify·파싱·전송 경로 정상.
 4. **cron-job.org 잡 등록**(필수): GitHub cron 단독으로는 발화가 안 되는 날이 있다 —

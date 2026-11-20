@@ -50,11 +50,13 @@ jobs:
 
       - name: Run byeolsikdang checker
         env:
-          # test 모드에서는 유료 Apify 호출을 별도 테스트 토큰(있으면)으로,
-          # Slack 은 나와의 대화(SLACK_WEBHOOK_URL_TEST)로 보내 공유 채널(#오늘의점심)
-          # 스팸과 운영 크레딧 소모를 피한다. 평시는 운영 시크릿.
+          # test 모드에서는 유료 Apify 호출을 별도 테스트 토큰(있으면)으로 보내 운영 크레딧
+          # 소모를 피한다. 평시는 운영 토큰.
           APIFY_TOKEN: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true' && secrets.APIFY_TOKEN_TEST != '') && secrets.APIFY_TOKEN_TEST || secrets.APIFY_TOKEN }}
-          SLACK_WEBHOOK_URL: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && secrets.SLACK_WEBHOOK_URL_TEST || secrets.SLACK_WEBHOOK_URL }}
+          # Slack 은 2026-11-20 부터 평시·test 구분 없이 나와의 대화(SLACK_WEBHOOK_URL_TEST)로만
+          # 보낸다 — 공유 채널(#오늘의점심) 발송 중단(사용자 요청). 실패 안내 메시지도 같은 곳.
+          # 되살리려면 menu.yml 의 같은 자리 주석에 적힌 조건식으로 되돌린다.
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL_TEST }}
           TEST_MODE: ${{ (github.event_name == 'workflow_dispatch' && inputs.test == 'true') && '1' || '0' }}
         run: python check_byeolsikdang.py
 
