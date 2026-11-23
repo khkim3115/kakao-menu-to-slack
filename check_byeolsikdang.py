@@ -30,7 +30,7 @@ check_menu.py 는 절대 수정하지 않고 헬퍼만 import 한다(import 는 
 환경변수:
   APIFY_TOKEN         (필수)  Apify API 토큰 (Apify Console → Settings → API)
   SLACK_WEBHOOK_URL   (필수)  Slack Incoming Webhook URL
-                              (워크플로는 2026-11-20 부터 늘 SLACK_WEBHOOK_URL_TEST=나와의 대화 를 주입)
+                              (워크플로 test 모드에서는 SLACK_WEBHOOK_URL_TEST=나와의 대화 로 주입)
   TEST_MODE           (선택)  "1"이면 캡션/중복/주말·공휴일 필터를 무시하고 최신 이미지 게시물을
                               강제 전송(배선 점검용). CLI 플래그 --test 와 동일.
   MENU_CAPTION_REQUIRE_ALL, MENU_CAPTION_REQUIRE_ANY  (선택)  캡션 필터 튜닝(쉼표 구분).
