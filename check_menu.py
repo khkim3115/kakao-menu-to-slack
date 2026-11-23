@@ -21,7 +21,7 @@
 
 환경변수:
   SLACK_WEBHOOK_URL   (필수)  Slack Incoming Webhook URL
-                              (워크플로는 2026-11-20 부터 늘 SLACK_WEBHOOK_URL_TEST=나와의 대화 를 주입)
+                              (워크플로 test 모드에서는 SLACK_WEBHOOK_URL_TEST=나와의 대화 로 주입)
   CHANNEL_ID          (선택)  기본 "_xjxoPlG"
   TEST_MODE           (선택)  "1"이면 로고/중복/주말·공휴일 필터를 무시하고 현재 이미지를 강제 전송(배선 점검용)
   GITHUB_ACTIONS,
