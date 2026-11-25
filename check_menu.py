@@ -6,6 +6,7 @@
 동작 원리:
   0) 주말·한국 공휴일이면 즉시 종료한다(식당이 휴일에 이미지를 바꿔도 전송 안 함).
   1) 공개 API(로그인 불필요)에서 현재 채널 프로필 이미지를 읽는다.
+     일시 무응답에 대비해 2회 재시도함. 끝내 실패하면 오늘 메뉴를 아직 안 보낸 경우에만 Slack 경고.
   2) 회사 로고(등록된 목록)면 무시한다(= 메뉴 아님).
   3) 직전에 보낸 이미지와 다른 새 이미지면 = 오늘의 메뉴 → Slack 전송 후 상태 저장.
      단, 오늘 이미 보냈으면 이미지가 또 바뀌어도 보내지 않는다(하루 1건).
@@ -121,6 +122,23 @@ def get_profile_image():
     url = to_https(m.group(1))
     pm = re.search(r"/dn/([^/]+/[^/]+/[^/]+)/img", url)  # .../dn/<path>/img_xl.jpg
     return {"id": None, "path": pm.group(1) if pm else None, "url": url, "avg": None, "source": "og"}
+
+
+# 조회 재시도 간격(초). 카카오 일시 무응답(2026-11-25 11:20 두 주소 모두 timed out, 직후 정상) 대비.
+FETCH_RETRY_DELAYS = (5, 15)
+
+
+def get_profile_image_with_retry(delays=FETCH_RETRY_DELAYS):
+    """get_profile_image 를 재시도함. 모든 시도가 실패하면 마지막 예외를 그대로 올림."""
+    for i in range(len(delays) + 1):
+        try:
+            return get_profile_image()
+        except Exception as e:
+            if i == len(delays):
+                raise
+            print(f"[warn] 프로필 이미지 조회 실패({i + 1}회차) → {delays[i]}초 뒤 재시도: {e}",
+                  file=sys.stderr)
+            time.sleep(delays[i])
 
 
 def img_key(img):
@@ -330,10 +348,16 @@ def main():
             return
 
     try:
-        img = get_profile_image()
+        img = get_profile_image_with_retry()
     except Exception as e:
         print(f"[error] 프로필 이미지 조회 실패: {e}", file=sys.stderr)
-        alert_slack(str(e))
+        # 오늘 메뉴를 이미 보냈으면 채널 경고 생략(실행 실패로만 남김)
+        state = load_state()
+        if not test_mode and sent_today(state, now):
+            print(f"[info] 오늘 이미 전송함({state.get('last_sent_kst')}) → Slack 경고 생략",
+                  file=sys.stderr)
+        else:
+            alert_slack(str(e))
         sys.exit(1)
 
     print(f"[observe] {now:%Y-%m-%d %H:%M:%S} KST "
